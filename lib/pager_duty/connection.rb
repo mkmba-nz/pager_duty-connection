@@ -210,6 +210,8 @@ module PagerDuty
           end
         when :Bearer
           conn.request :authorization, "Bearer", token
+        when :Custom
+          token.call conn
         else raise ArgumentError, "invalid token_type: #{token_type.inspect}"
         end
 
