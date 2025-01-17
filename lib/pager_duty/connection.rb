@@ -139,6 +139,8 @@ module PagerDuty
       end
 
       def parse(body)
+        return body if body.respond_to?(:empty?) && body.empty?
+
         case body
         when Hash, ::Hashie::Mash
           OBJECT_KEYS.each do |key|
