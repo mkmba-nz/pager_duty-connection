@@ -222,11 +222,28 @@ module PagerDuty
       end
     end
 
+    # error_middleware returns this class's status→exception middlewares, in
+    # registration order (matching initialize: the 401 check runs first on the
+    # response, then 403, 429, 404, with the catch-all non-200 check last).
+    # Exposed for callers that build their own connection (see the connection:
+    # keyword) so their stack raises the same exception types as a gem-built
+    # connection.
+    def self.error_middleware
+      [
+        RaiseApiErrorOnNon200,
+        RaiseFileNotFoundOn404,
+        RaiseRateLimitOn429,
+        RaiseForbiddenOn403,
+        RaiseUnauthorizedOn401
+      ]
+    end
+
     # Pass connection: to use a pre-built Faraday connection instead of having
     # this class build one. The caller owns the full middleware stack,
     # including authentication and error handling; apply self.api_middleware
     # to it for the request/response transformations the request methods
-    # expect. token/token_type/url/debug are ignored when connection is given.
+    # expect (and self.error_middleware for the gem's exception types).
+    # token/token_type/url/debug are ignored when connection is given.
     def initialize(token = nil, token_type: :Token, url: API_PREFIX, debug: false, connection: nil)
       if connection
         @connection = connection
@@ -256,11 +273,7 @@ module PagerDuty
         # Because Faraday::Middleware executes in reverse order of
         # calls to conn.use, status code error handling goes at the
         # end of the block so that it runs first
-        conn.use RaiseApiErrorOnNon200
-        conn.use RaiseFileNotFoundOn404
-        conn.use RaiseRateLimitOn429
-        conn.use RaiseForbiddenOn403
-        conn.use RaiseUnauthorizedOn401
+        self.class.error_middleware.each { |m| conn.use m }
 
         conn.adapter Faraday.default_adapter
       end
