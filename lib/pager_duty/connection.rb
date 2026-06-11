@@ -199,7 +199,40 @@ module PagerDuty
       end
     end
 
-    def initialize(token, token_type: :Token, url: API_PREFIX, debug: false)
+    # api_middleware returns a proc that adds the request/response
+    # transformation middleware this class requires (time conversion, JSON
+    # encoding/decoding, API version header, mashifying) to a Faraday
+    # connection. It is applied during initialize, and is exposed for callers
+    # that build their own connection (see the connection: keyword) so they
+    # can compose it into their stack. Authentication, error raising, and the
+    # adapter are deliberately excluded — an injected connection brings its
+    # own.
+    def self.api_middleware
+      lambda do |conn|
+        conn.use ConvertTimesParametersToISO8601
+
+        # use json
+        conn.request :json
+        conn.headers[:accept] = "application/vnd.pagerduty+json;version=#{API_VERSION}"
+
+        # json back, mashify it
+        conn.use ParseTimeStrings
+        conn.use Mashify
+        conn.response :json
+      end
+    end
+
+    # Pass connection: to use a pre-built Faraday connection instead of having
+    # this class build one. The caller owns the full middleware stack,
+    # including authentication and error handling; apply self.api_middleware
+    # to it for the request/response transformations the request methods
+    # expect. token/token_type/url/debug are ignored when connection is given.
+    def initialize(token = nil, token_type: :Token, url: API_PREFIX, debug: false, connection: nil)
+      if connection
+        @connection = connection
+        return
+      end
+
       @connection = Faraday.new do |conn|
         conn.url_prefix = url
 
@@ -217,16 +250,7 @@ module PagerDuty
         else raise ArgumentError, "invalid token_type: #{token_type.inspect}"
         end
 
-        conn.use ConvertTimesParametersToISO8601
-
-        # use json
-        conn.request :json
-        conn.headers[:accept] = "application/vnd.pagerduty+json;version=#{API_VERSION}"
-
-        # json back, mashify it
-        conn.use ParseTimeStrings
-        conn.use Mashify
-        conn.response :json
+        self.class.api_middleware.call(conn)
         conn.response :logger, ::Logger.new($stdout), bodies: true if debug
 
         # Because Faraday::Middleware executes in reverse order of
